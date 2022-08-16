@@ -1,82 +1,100 @@
 ## -*- coding: utf-8 -*-
-import telebot
+from aiogram import Bot, Dispatcher, executor, types
+from aiogram.dispatcher.filters import Text
 from dotenv import load_dotenv
 import os
 from os.path import join, dirname
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
 
+storage=MemoryStorage()
+
+class FSMAdmin(StatesGroup):
+    name = State()
+    date = State()
+    start = State()
+    final = State()
+    description = State()
 
 def get_from_env(key):
     dotenv_path = join(dirname(__file__), '.env')
     load_dotenv(dotenv_path)
     return os.environ.get(key)
 
-bot = telebot.TeleBot(get_from_env("TELEGRAM_BOT_TOKEN"))
+bot = Bot(token=get_from_env("TELEGRAM_BOT_TOKEN"),  parse_mode=types.ParseMode.HTML)
 driver_number = get_from_env("driver_number")
 driver_telegram = get_from_env("driver_telegram")
+dp = Dispatcher(bot, storage=storage)
+data=[]
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    bot.send_message(message.chat.id, f"Здравствуйте, <b>{message.from_user.first_name}</b>", parse_mode='html')
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add('Подать заявку', 'Связаться с водителем')
-    bot.send_message(message.from_user.id, 'Что вы хотите сделать?', reply_markup=markup)
+@dp.message_handler(commands='start')
+async def start(message: types.Message):
+    start_button = ['Подать заявку', 'Связаться с водителем']
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(*start_button)
 
+    await message.answer('Выбери необходимую операцию', reply_markup=keyboard)
 
-@bot.message_handler(content_types=['text'])
-def get_user_choice(message):
-    if message.text.strip() == "Подать заявку":
-        save_user_data(message)
-    elif message.text.strip() == "Связаться с водителем":
-        bot.send_message(message.from_user.id, f"Номер телефона водителя: <b>{driver_number}</b>,\n"
-                                               f"Телеграм водителя: <b>@{driver_telegram}</b>", parse_mode="html")
+@dp.message_handler(Text(equals='Подать заявку'), state=None)
+async def cm_start(message: types.Message):
+    await FSMAdmin.name.set()
+    await message.answer('Напиши свое имя и фамилию')
 
+@dp.message_handler(state=FSMAdmin.name)
+async def save_name(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['name'] = message.text
+    await FSMAdmin.next()
+    await message.answer('Напиши дату поездки')
 
-def save_user_data(message):
-    name = bot.send_message(message.from_user.id, 'Введите имя и фамилию пассажира',
-                            reply_markup=telebot.types.ReplyKeyboardRemove())
-    bot.register_next_step_handler(name, save_name)
+@dp.message_handler(state=FSMAdmin.date)
+async def save_date(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['date'] = message.text
+    await FSMAdmin.next()
+    await message.answer('Напиши начальную точку поездки <i>(откуда)</i>')
 
+@dp.message_handler(state=FSMAdmin.start)
+async def save_start(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['start'] = message.text
+    await FSMAdmin.next()
+    await message.answer('Напиши конечную точку поездки <i>(куда)</i>')
 
-def save_name(message):
-    file = open("data/data.txt", "a")
-    file.write("Имя и фамилия пассажира: " + message.text + '\n')
-    file.close()
-    date = bot.send_message(message.from_user.id, 'Введите дату поездки')
-    bot.register_next_step_handler(date, save_date)
+@dp.message_handler(state=FSMAdmin.final)
+async def save_final(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['final'] = message.text
+    await FSMAdmin.next()
+    await message.answer('Напиши дополнительную информацию <i>(если нужно)</i>')
 
+@dp.message_handler(state=FSMAdmin.description)
+async def save_description(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['description'] = message.text
 
-def save_date(message):
-    file = open("data/data.txt", "a")
-    file.write("Дата поездки: " + message.text + '\n')
-    file.close()
-    start_point = bot.send_message(message.from_user.id, 'Введите начальую точку поездки (откуда)')
-    bot.register_next_step_handler(start_point, save_start_point)
+    async with state.proxy() as data:
+        file = open('users_data.txt', 'a')
+        for key, value in data.items():
+            file.write(f'{key}: {value}\n')
+        file.write(f'\n')
+        file.close()
+        await message.answer(f"<i>Ваша заявка принята</i>\nИмя и фамилия: <b>{data['name']}</b>,\n"
+                             f"Дата поездки: <b>{data['date']}</b>,\n"
+                             f"Начальная точка: <b>{data['start']}</b>,\n"
+                             f"Конечная точка: <b>{data['final']}</b>,\n"
+                             f"Дополнительная информация: <b>{data['description']}</b>,\n"
+                             f"<i>Спасибо за обращение</i>")
+    await state.finish()
 
+@dp.message_handler(Text(equals='Связаться с водителем'))
+async def get_info(message: types.Message):
+    driver_info=f'Номер телефона водителя: <b>{driver_number}</b>\nТелеграмм водителя: <b>@{driver_telegram}</b>'
+    await message.answer(driver_info)
 
-def save_start_point(message):
-    file = open("data/data.txt", "a")
-    file.write("Начальный пункт: " + message.text + '\n')
-    file.close()
-    final_point = bot.send_message(message.from_user.id, 'Введите конечную точку поездки (куда)')
-    bot.register_next_step_handler(final_point, save_final_point)
+def main():
+    executor.start_polling(dp)
 
-
-def save_final_point(message):
-    file = open("data/data.txt", "a")
-    file.write("Конечный пункт: " + message.text + '\n')
-    file.close()
-    optional_information = bot.send_message(message.from_user.id,
-                                            'Введите дополнительное сообщения для водителя\n<i>(если не нужно напишите: -)</i>',
-                                            parse_mode="html")
-    bot.register_next_step_handler(optional_information, save_optional_information)
-
-
-def save_optional_information(message):
-    file = open("data/data.txt", "a")
-    file.write("Дополнительная информация: "  + message.text + '\n\n')
-    file.close()
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add('Подать заявку', 'Связаться с водителем')
-    bot.send_message(message.from_user.id, 'Спасибо, ваша заявка <b>принята</b>',parse_mode="html", reply_markup=markup)
-
-bot.polling(none_stop=True)
+if __name__ == '__main__':
+    main()
