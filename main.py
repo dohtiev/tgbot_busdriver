@@ -21,6 +21,7 @@ class FSMAdmin(StatesGroup):
     date = State()
     start = State()
     final = State()
+    phone_number = State()
     description = State()
 
 bot = Bot(token=get_from_env("TELEGRAM_BOT_TOKEN"),  parse_mode=types.ParseMode.HTML)
@@ -34,40 +35,47 @@ async def start(message: types.Message):
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(*start_button)
 
-    await message.answer('Выбери необходимую операцию', reply_markup=keyboard)
+    await message.answer('Выберите необходимую операцию', reply_markup=keyboard)
 
 @dp.message_handler(Text(equals='Подать заявку'), state=None)
 async def cm_start(message: types.Message):
     await FSMAdmin.name.set()
-    await message.answer('Напиши свое имя и фамилию')
+    await message.answer('Напишите свое имя и фамилию')
 
 @dp.message_handler(state=FSMAdmin.name)
 async def save_name(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['name'] = message.text
     await FSMAdmin.next()
-    await message.answer('Напиши дату поездки')
+    await message.answer('Напишите дату поездки')
 
 @dp.message_handler(state=FSMAdmin.date)
 async def save_date(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['date'] = message.text
     await FSMAdmin.next()
-    await message.answer('Напиши начальную точку поездки <i>(откуда)</i>')
+    await message.answer('Напишите начальную точку поездки <i>(откуда)</i>')
 
 @dp.message_handler(state=FSMAdmin.start)
 async def save_start(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['start'] = message.text
     await FSMAdmin.next()
-    await message.answer('Напиши конечную точку поездки <i>(куда)</i>')
+    await message.answer('Напишите конечную точку поездки <i>(куда)</i>')
 
 @dp.message_handler(state=FSMAdmin.final)
 async def save_final(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['final'] = message.text
     await FSMAdmin.next()
-    await message.answer('Напиши дополнительную информацию <i>(если нужно)</i>')
+    await message.answer('Напишите ваш номер телефона')
+
+@dp.message_handler(state=FSMAdmin.phone_number)
+async def save_final(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['phone_number'] = message.text
+    await FSMAdmin.next()
+    await message.answer('Напишите дополнительную информацию <i>(если нужно)</i>')
 
 @dp.message_handler(state=FSMAdmin.description)
 async def save_description(message: types.Message, state: FSMContext):
@@ -84,15 +92,16 @@ async def save_description(message: types.Message, state: FSMContext):
                              f"Дата поездки: <b>{data['date']}</b>,\n"
                              f"Начальная точка: <b>{data['start']}</b>,\n"
                              f"Конечная точка: <b>{data['final']}</b>,\n"
+                             f"Номер телефона: <b>{data['phone_number']}</b>,\n"
                              f"Дополнительная информация: <b>{data['description']}</b>,\n"
                              f"<i>Спасибо за обращение</i>")
 
     gc = pygsheets.authorize(service_file=get_from_env("path_to_credentials"))
     sht1 = gc.open_by_key(get_from_env("sheet_key"))
     wks = sht1.sheet1
-    data_for_sheet = [[data['name']], [data['date']], [data['start']], [data['final']], [data['description']]]
+    data_for_sheet = [[data['name']], [data['date']], [data['start']], [data['final']], [data['phone_number']], [data['description']]]
     wks.append_table(values=data_for_sheet, start='A2', end=None, dimension='COLUMNS', overwrite=False)
-    # print(wks.get_values('A2','E2'))
+    # print(wks.get_values('A2','F2'))
     await state.finish()
 
 @dp.message_handler(Text(equals='Связаться с водителем'))
